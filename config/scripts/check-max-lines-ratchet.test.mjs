@@ -1,6 +1,11 @@
-import { describe, expect, it } from 'vitest'
+import { execFileSync } from 'node:child_process'
+import { mkdtempSync, mkdirSync, rmSync, writeFileSync } from 'node:fs'
+import { tmpdir } from 'node:os'
+import { join } from 'node:path'
+import { afterEach, describe, expect, it } from 'vitest'
 
 import {
+  collectCurrentSuppressions,
   collectMobileBumps,
   defaultLimitForPath,
   diffBaseline,
@@ -62,6 +67,13 @@ describe('defaultLimitForPath', () => {
     expect(defaultLimitForPath('a/b.mjs')).toBe(600)
     expect(defaultLimitForPath('a/b.ts')).toBe(300)
   })
+
+  it('treats .mts and .cts as TypeScript, including their test/spec variants', () => {
+    expect(defaultLimitForPath('a/b.mts')).toBe(300)
+    expect(defaultLimitForPath('a/b.cts')).toBe(300)
+    expect(defaultLimitForPath('a/b.test.mts')).toBe(800)
+    expect(defaultLimitForPath('a/b.spec.cts')).toBe(800)
+  })
 })
 
 describe('collectMobileBumps', () => {
@@ -111,5 +123,46 @@ describe('diffBaseline', () => {
     const { added, stale } = diffBaseline(['inline a.ts'], new Set(['inline a.ts']))
     expect(added).toEqual([])
     expect(stale).toEqual([])
+  })
+})
+
+describe('collectCurrentSuppressions', () => {
+  let scratch
+
+  afterEach(() => {
+    if (scratch) {
+      rmSync(scratch, { recursive: true, force: true })
+      scratch = undefined
+    }
+  })
+
+  function trackedRepo(files) {
+    scratch = mkdtempSync(join(tmpdir(), 'orca-max-lines-ratchet-'))
+    execFileSync('git', ['init', '--quiet'], { cwd: scratch })
+    for (const [rel, contents] of Object.entries(files)) {
+      const full = join(scratch, rel)
+      mkdirSync(join(full, '..'), { recursive: true })
+      writeFileSync(full, contents)
+    }
+    execFileSync('git', ['add', '.'], { cwd: scratch })
+    return scratch
+  }
+
+  it('finds a max-lines disable in .mts and .cts, not only .ts/.tsx/.mjs', () => {
+    const root = trackedRepo({
+      'a/plain.ts': '/* oxlint-disable max-lines */\nexport const a = 1\n',
+      'a/module.mts': '/* oxlint-disable max-lines */\nexport const b = 1\n',
+      'a/module.cts': '// oxlint-disable-line max-lines\nexport const c = 1\n'
+    })
+    expect(collectCurrentSuppressions(root)).toEqual([
+      'inline a/module.cts',
+      'inline a/module.mts',
+      'inline a/plain.ts'
+    ])
+  })
+
+  it('ignores ordinary .mts files without a disable directive', () => {
+    const root = trackedRepo({ 'a/module.mts': 'export const a = 1\n' })
+    expect(collectCurrentSuppressions(root)).toEqual([])
   })
 })

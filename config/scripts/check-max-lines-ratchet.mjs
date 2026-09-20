@@ -23,8 +23,9 @@ const SELF_FILES = new Set([
 ])
 
 // Default max-lines budgets from .oxlintrc.json (counted lines).
+// `.mts`/`.cts` are TypeScript too, so they share the `.ts` budget.
 export function defaultLimitForPath(p) {
-  if (/\.(test|spec)\.(ts|tsx)$/.test(p)) {
+  if (/\.(test|spec)\.(ts|tsx|mts|cts)$/.test(p)) {
     return 800
   }
   if (p.endsWith('.tsx')) {
@@ -92,8 +93,10 @@ export function diffBaseline(current, baseline) {
 }
 
 // Collect every current suppression entry from the tracked tree.
+// `.mts`/`.cts` are scanned too: without them a file could dodge the ratchet by
+// switching extension (they carry the same `max-lines` rule as `.ts`).
 export function collectCurrentSuppressions(root = process.cwd()) {
-  const tracked = execFileSync('git', ['ls-files', '*.ts', '*.tsx', '*.mjs'], {
+  const tracked = execFileSync('git', ['ls-files', '*.ts', '*.tsx', '*.mts', '*.cts', '*.mjs'], {
     cwd: root,
     encoding: 'utf8',
     maxBuffer: 64 * 1024 * 1024
